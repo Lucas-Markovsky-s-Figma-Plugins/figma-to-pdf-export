@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<style>
+  :root { color-scheme: light dark; --accent: #F24822; --accent-hover: #d63a18; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: Inter, -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 12px; margin: 0; padding: 0;
+    display: flex; flex-direction: row; height: 100vh; overflow: hidden;
+  }
+  
+  /* Bloqueio global durante a exportação */
+  body.is-exporting .preview-panel,
+  body.is-exporting .settings-content > :not(.actions) {
+    pointer-events: none;
+    opacity: 0.6;
+    user-select: none;
+  }
+
+  .preview-panel {
+    width: 210px; min-width: 210px; display: flex; flex-direction: column;
+    border-right: 1px solid var(--figma-color-border);
+    background: var(--figma-color-bg-secondary); overflow: hidden;
+  }
+  .preview-panel > h2 {
+    font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--figma-color-text-secondary); margin: 0; padding: 12px 10px 8px 10px;
+  }
+  .frame-list {
+    display: flex; flex-direction: column; gap: 6px;
+    padding: 0 8px 8px 8px; overflow-y: auto; flex: 1; min-height: 0;
+  }
+  .empty-state {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 32px 12px; text-align: center; color: var(--figma-color-text-secondary);
+    font-size: 11px; gap: 8px; flex: 1;
+  }
+  .empty-state svg { opacity: 0.4; }
+  .frame-item {
+    position: relative; display: flex; flex-direction: column; border-radius: 6px;
+    cursor: grab; background: var(--figma-color-bg);
+    border: 1px solid var(--figma-color-border); overflow: hidden;
+    user-select: none; flex-shrink: 0;
+  }
+  .frame-item.dragging { opacity: 0.4; cursor: grabbing; }
+  .frame-item .thumb-wrap {
+    width: 100%; overflow: hidden; display: flex; align-items: flex-start;
+    justify-content: center; background: var(--figma-color-bg-secondary); max-height: 160px;
+  }
+  .frame-item img { width: 100%; height: auto; display: block; }
+  .frame-item .badge {
+    position: absolute; top: 6px; right: 6px; background: rgba(0,0,0,0.7);
+    color: #fff; font-size: 10px; font-weight: 600; width: 18px; height: 18px;
+    display: flex; align-items: center; justify-content: center; border-radius: 4px;
+  }
+  .frame-item .name {
+    padding: 4px 6px; font-size: 10px; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; color: var(--figma-color-text);
+    border-top: 1px solid var(--figma-color-border);
+  }
+  .order-controls {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 6px; padding: 8px; border-top: 1px solid var(--figma-color-border);
+  }
+  .segmented {
+    display: inline-flex; border-radius: 4px; overflow: hidden;
+    border: 1px solid var(--figma-color-border);
+  }
+  .seg-btn {
+    padding: 4px 6px; border: none; background: var(--figma-color-bg);
+    color: var(--figma-color-text); cursor: pointer; font-size: 10px;
+  }
+  .seg-btn + .seg-btn { border-left: 1px solid var(--figma-color-border); }
+  .seg-btn.active { background: var(--accent); color: #fff; }
+  .reset-btn {
+    background: none; border: none; color: var(--accent);
+    cursor: pointer; font-size: 10px; font-weight: 500; padding: 2px;
+  }
+  .settings-panel {
+    flex: 1; display: flex; flex-direction: column; gap: 14px;
+    padding: 16px; overflow-y: auto; min-width: 0;
+  }
+  .section {
+    display: flex; flex-direction: column; gap: 8px;
+    padding-bottom: 12px;
+  }
+  .section:last-of-type { border-bottom: none; padding-bottom: 0; }
+  h2 {
+    font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--figma-color-text-secondary); margin: 0 0 2px 0;
+  }
+  .field-group { display: flex; flex-direction: column; gap: 6px; }
+  .subfield { display: flex; flex-direction: column; gap: 6px; }
+  label { font-weight: 500; }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .checkbox-row input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px; }
+  select, input[type="number"] {
+    padding: 5px 6px; border-radius: 4px; border: 1px solid var(--figma-color-border);
+    background: var(--figma-color-bg); color: var(--figma-color-text);
+  }
+  .error-msg {
+    display: none; font-size: 11px; color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    padding: 6px 8px; border-radius: 4px;
+  }
+  .error-msg.active { display: block; }
+  .progress-wrap { 
+    display: none; 
+    flex-direction: column; 
+    gap: 6px; 
+    width: 100%; 
+    pointer-events: auto; /* Garante que a área de cancelamento receba cliques */
+  }
+  .progress-wrap.active { display: flex; }
+  .progress-bar-bg { width: 100%; height: 6px; background: var(--figma-color-bg-secondary); border-radius: 4px; overflow: hidden; }
+  .progress-bar-fill { height: 100%; width: 0%; background: var(--accent); transition: width 0.15s ease; }
+  .actions { display: flex; gap: 8px; margin-top: auto; width: 100%; }
+  button { padding: 7px 14px; border-radius: 6px; border: none; cursor: pointer; font-weight: 500; font-size: 12px; }
+  button.primary { background: var(--accent); color: #fff; flex: 1; }
+  button.primary:hover { background: var(--accent-hover); }
+  button.primary:disabled { 
+    background: #505050; 
+    color: #ddd;
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+  button.secondary { background: var(--figma-color-bg-secondary); color: var(--figma-color-text); }
+  .conditional-field { display: none; }
+  .conditional-field.visible { display: flex; }
+</style>
+</head>
+<body>
+
+<div class="preview-panel">
+  <h2>Frames</h2>
+  <div class="frame-list" id="frame-list"></div>
+  <div class="order-controls">
+    <div class="segmented" id="order-segmented">
+      <button class="seg-btn active" data-mode="layers" type="button">Layers</button>
+      <button class="seg-btn" data-mode="az" type="button">A-Z</button>
+      <button class="seg-btn" data-mode="za" type="button">Z-A</button>
+      <button class="seg-btn seg-custom" data-mode="custom" type="button" style="display:none;">Custom</button>
+    </div>
+    <button class="reset-btn" id="reset-order-btn" type="button" style="display:none;">Reset</button>
+  </div>
+</div>
+
+<div class="settings-panel">
+  <div class="settings-content" style="display:flex; flex-direction:column; gap: 24px; height: 100%">
+    <div class="section">
+      <h2>Export mode</h2>
+      <div class="field-group">
+        <div class="row checkbox-row">
+          <input type="checkbox" id="convert-image" />
+          <label for="convert-image">Rasterize frames</label>
+        </div>
+      </div>
+      <div class="field-group conditional-field" id="image-options">
+        <div class="subfield">
+          <label for="image-format">Format</label>
+          <select id="image-format">
+            <option value="jpg">JPG</option>
+            <option value="png">PNG</option>
+          </select>
+        </div>
+        <div class="subfield" style="width: 100%">
+          <label for="scale">Resolution</label>
+          <select id="scale">
+            <option value="0.5">x0.5</option>
+            <option value="1" selected>x1</option>
+            <option value="2">x2</option>
+            <option value="3">x3</option>
+            <option value="4">x4</option>
+            <option value="custom">Custom</option>
+          </select>
+          <input type="number" id="scale-custom" placeholder="Example: 2.5" step="0.1" style="display:none;" />
+        </div>
+      </div>
+    </div>
+
+    <div class="section" style="display:flex; flex-direction: column; gap: 12px">
+      <h2>PDF</h2>
+      <div class="row checkbox-row">
+        <input type="checkbox" id="compress-pdf" checked />
+        <label for="compress-pdf">Compress PDF</label>
+      </div>
+    </div>
+
+    <div class="section" id="quality-wrap" style="display:flex; flex-direction: column; gap: 12px">
+      <h2>QUALITY</h2>
+      <div class="row checkbox-row">
+        <div class="field-group" style="width: 100%">
+          <select id="quality-preset">
+            <option value="high" selected>High</option>
+            <option value="medium">Medium</option>
+            <option value="low">Low</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="section" style="display: none;">
+      <h2>COLOR MODE</h2>
+      <div class="row checkbox-row">
+        <div class="field-group" style="margin-top: 4px;">
+          <label for="color-mode">Color mode</label>
+          <select id="color-mode">
+            <option value="rgb" selected>RGB</option>
+            <option value="cmyk">CMYK</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="error-msg" id="error-msg"></div>
+
+    <div class="actions" style="margin-top: auto;">
+      <!-- BOTÃO DE EXPORTAÇÃO -->
+      <button class="primary" id="export-btn" type="button" disabled>Select a frame to export as PDF</button>
+
+      <!-- DIV DE PROGRESSO -->
+      <div class="progress-wrap" id="progress-wrap">
+        <div class="row" style="justify-content: space-between;">
+          <span id="progress-label">Exporting 0 / 0</span>
+          <button class="secondary" id="cancel-btn" type="button">Cancel</button>
+        </div>
+        <div class="progress-bar-bg"><div class="progress-bar-fill" id="progress-fill"></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
+
+<script>
+function checkLibraries() {
+  if (typeof window.PDFLib === "undefined") return "pdf-lib not loaded. Check your connection.";
+  if (typeof window.pako === "undefined") return "pako not loaded. Check your connection.";
+  return null;
+}
+
+function getQualitySettings() {
+  var presetEl = document.getElementById("quality-preset");
+  var preset = presetEl ? presetEl.value : "high";
+  if (preset === "high") return { jpegQuality: 0.70, downscale: 1.0 };
+  if (preset === "medium") return { jpegQuality: 0.50, downscale: 0.75 };
+  return { jpegQuality: 0.25, downscale: 0.50 };
+}
+
+var frames = [];
+var orderedIds = [];
+var sortMode = "layers";
+var dragSrcIndex = null;
+var exportedPages = [];
+var fileName = "export";
+var pageName = "Page";
+
+var frameListEl = document.getElementById("frame-list");
+var orderSegmented = document.getElementById("order-segmented");
+var resetOrderBtn = document.getElementById("reset-order-btn");
+var convertImageCb = document.getElementById("convert-image");
+var imageOptionsEl = document.getElementById("image-options");
+var imageFormatSel = document.getElementById("image-format");
+var scaleSel = document.getElementById("scale");
+var scaleCustom = document.getElementById("scale-custom");
+var qualityWrap = document.getElementById("quality-wrap");
+var compressPdfCb = document.getElementById("compress-pdf");
+var exportBtn = document.getElementById("export-btn");
+var cancelBtn = document.getElementById("cancel-btn");
+var progressWrap = document.getElementById("progress-wrap");
+var progressLabel = document.getElementById("progress-label");
+var progressFill = document.getElementById("progress-fill");
+var errorMsg = document.getElementById("error-msg");
+
+parent.postMessage({ pluginMessage: { type: "get-frames" } }, "*");
+
+function showEmptyState() {
+  frameListEl.innerHTML = '<div class="empty-state"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/></svg><span>Select frames on canvas</span></div>';
+}
+
+function renderFrames() {
+  if (frames.length === 0) { 
+    showEmptyState(); 
+    updateButtonState(); 
+    return; 
+  }
+  frameListEl.innerHTML = "";
+  orderedIds.forEach(function(id, idx) {
+    var f = frames.find(function(fr) { return fr.id === id; });
+    if (!f) return;
+    var item = document.createElement("div");
+    item.className = "frame-item"; item.draggable = true; item.dataset.index = idx;
+    var thumbWrap = document.createElement("div"); thumbWrap.className = "thumb-wrap";
+    var img = document.createElement("img"); img.src = f.thumbnailUrl;
+    thumbWrap.appendChild(img);
+    var badge = document.createElement("div"); badge.className = "badge"; badge.textContent = idx + 1;
+    var nameEl = document.createElement("div"); nameEl.className = "name"; nameEl.textContent = f.name;
+    item.appendChild(thumbWrap); item.appendChild(badge); item.appendChild(nameEl);
+    item.addEventListener("dragstart", function(e) { dragSrcIndex = idx; item.classList.add("dragging"); e.dataTransfer.effectAllowed = "move"; });
+    item.addEventListener("dragend", function() { item.classList.remove("dragging"); dragSrcIndex = null; });
+    item.addEventListener("dragover", function(e) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; });
+    item.addEventListener("drop", function(e) {
+      e.preventDefault();
+      if (dragSrcIndex === null || dragSrcIndex === idx) return;
+      var movedId = orderedIds.splice(dragSrcIndex, 1)[0];
+      orderedIds.splice(idx, 0, movedId); switchToCustom(); renderFrames();
+    });
+    frameListEl.appendChild(item);
+  });
+  updateButtonState();
+}
+
+function updateButtonState() {
+  var count = frames.length;
+  if (count === 0) {
+    exportBtn.disabled = true;
+    exportBtn.textContent = "Select a frame to export as PDF";
+  } else {
+    exportBtn.disabled = false;
+    exportBtn.textContent = "Export " + count + " " + (count > 1 ? "pages" : "page") + " as a single PDF";
+  }
+}
+
+function sortByLayers() { orderedIds = frames.slice().sort(function(a, b) { return b.layerIndex - a.layerIndex; }).map(function(f) { return f.id; }); }
+function sortByNameAZ() { orderedIds = frames.slice().sort(function(a, b) { return a.name.localeCompare(b.name, undefined, { numeric: true }); }).map(function(f) { return f.id; }); }
+function sortByNameZA() { orderedIds = frames.slice().sort(function(a, b) { return b.name.localeCompare(a.name, undefined, { numeric: true }); }).map(function(f) { return f.id; }); }
+
+function switchToCustom() {
+  sortMode = "custom";
+  orderSegmented.querySelectorAll(".seg-btn").forEach(function(b) { b.classList.remove("active"); });
+  var customBtn = orderSegmented.querySelector('[data-mode="custom"]');
+  customBtn.style.display = ""; customBtn.classList.add("active");
+  resetOrderBtn.style.display = "";
+}
+
+orderSegmented.addEventListener("click", function(e) {
+  var btn = e.target.closest(".seg-btn"); if (!btn) return;
+  sortMode = btn.dataset.mode;
+  orderSegmented.querySelectorAll(".seg-btn").forEach(function(b) { b.classList.remove("active"); });
+  btn.classList.add("active");
+  if (sortMode === "layers") sortByLayers();
+  else if (sortMode === "az") sortByNameAZ();
+  else if (sortMode === "za") sortByNameZA();
+  renderFrames();
+});
+
+resetOrderBtn.addEventListener("click", function() {
+  sortMode = "layers";
+  orderSegmented.querySelectorAll(".seg-btn").forEach(function(b) { b.classList.remove("active"); });
+  orderSegmented.querySelector('[data-mode="layers"]').classList.add("active");
+  orderSegmented.querySelector('[data-mode="custom"]').style.display = "none";
+  resetOrderBtn.style.display = "none"; sortByLayers(); renderFrames();
+});
+
+function updateQualityVisibility() {
+  var rasterJpg = convertImageCb.checked && imageFormatSel.value === "jpg";
+  var compressOn = compressPdfCb.checked;
+  if (qualityWrap) {
+    qualityWrap.style.display = (rasterJpg || compressOn) ? "flex" : "none";
+  }
+}
+
+convertImageCb.addEventListener("change", function() {
+  imageOptionsEl.classList.toggle("visible", convertImageCb.checked);
+  updateQualityVisibility();
+});
+imageFormatSel.addEventListener("change", updateQualityVisibility);
+compressPdfCb.addEventListener("change", updateQualityVisibility);
+scaleSel.addEventListener("change", function() { scaleCustom.style.display = scaleSel.value === "custom" ? "" : "none"; });
+
+updateQualityVisibility();
+
+// PDF COMPRESSION & CMYK & EXPORT LOGIC
+async function compressPdfBytes(pdfBytes, jpegQuality, downscaleFactor) {
+  var PDFLib = window.PDFLib;
+  var pdfDoc = await PDFLib.PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+
+  var JPEG_QUALITY = jpegQuality;
+  var DOWNSCALE_FACTOR = downscaleFactor;
+  var DOWNSCALE_THRESHOLD = 800;
+  var MIN_STREAM_SIZE = 30000;
+
+  var context = pdfDoc.context;
+  var allObjects = context.enumerateIndirectObjects();
+  var compressed = 0;
+
+  for (var entry of allObjects) {
+    var obj = entry[1];
+    if (!obj || !obj.dict) continue;
+    if (!(obj.contents instanceof Uint8Array)) continue;
+
+    var dict = obj.dict;
+    var subtypeEntry = dict.get(PDFLib.PDFName.of("Subtype"));
+    if (!subtypeEntry || subtypeEntry.toString() !== "/Image") continue;
+
+    var widthObj = dict.get(PDFLib.PDFName.of("Width"));
+    var heightObj = dict.get(PDFLib.PDFName.of("Height"));
+    if (!widthObj || !heightObj) continue;
+    var w = parseInt(widthObj.toString());
+    var h = parseInt(heightObj.toString());
+    if (isNaN(w) || isNaN(h) || w < 10 || h < 10) continue;
+
+    var filterObj = dict.get(PDFLib.PDFName.of("Filter"));
+    var filterStr = filterObj ? filterObj.toString() : "";
+    if (filterStr.includes("DCTDecode")) continue;
+
+    var bpcObj = dict.get(PDFLib.PDFName.of("BitsPerComponent"));
+    var bpc = bpcObj ? parseInt(bpcObj.toString()) : 8;
+    if (bpc !== 8) continue;
+
+    var csObj = dict.get(PDFLib.PDFName.of("ColorSpace"));
+    var csStr = csObj ? csObj.toString() : "/DeviceRGB";
+    var channels = 3;
+    if (csStr.includes("Gray")) channels = 1;
+    else if (csStr.includes("CMYK")) channels = 4;
+    else if (csStr.includes("RGB")) channels = 3;
+    else continue;
+
+    var streamData = obj.contents;
+    if (streamData.length < MIN_STREAM_SIZE) continue;
+
+    var pixelData = streamData;
+    if (filterStr.includes("FlateDecode")) {
+      try { pixelData = pako.inflate(streamData); } catch (e) { continue; }
+    }
+
+    var expectedSize = w * h * channels;
+    if (pixelData.length < expectedSize) continue;
+
+    var outW = w, outH = h;
+    if (DOWNSCALE_FACTOR < 1 && (w > DOWNSCALE_THRESHOLD || h > DOWNSCALE_THRESHOLD)) {
+      outW = Math.round(w * DOWNSCALE_FACTOR);
+      outH = Math.round(h * DOWNSCALE_FACTOR);
+    }
+
+    try {
+      var srcCanvas = document.createElement("canvas");
+      srcCanvas.width = w; srcCanvas.height = h;
+      var srcCtx = srcCanvas.getContext("2d");
+      var imgData = srcCtx.createImageData(w, h);
+
+      for (var i = 0, j = 0; i < w * h; i++, j += 4) {
+        if (channels === 1) {
+          imgData.data[j] = imgData.data[j+1] = imgData.data[j+2] = pixelData[i];
+        } else if (channels === 3) {
+          imgData.data[j] = pixelData[i*3];
+          imgData.data[j+1] = pixelData[i*3+1];
+          imgData.data[j+2] = pixelData[i*3+2];
+        } else if (channels === 4) {
+          var c2 = pixelData[i*4]/255, m2 = pixelData[i*4+1]/255;
+          var y2 = pixelData[i*4+2]/255, k2 = pixelData[i*4+3]/255;
+          imgData.data[j] = Math.round(255*(1-c2)*(1-k2));
+          imgData.data[j+1] = Math.round(255*(1-m2)*(1-k2));
+          imgData.data[j+2] = Math.round(255*(1-y2)*(1-k2));
+        }
+        imgData.data[j+3] = 255;
+      }
+      srcCtx.putImageData(imgData, 0, 0);
+
+      var outCanvas = document.createElement("canvas");
+      outCanvas.width = outW; outCanvas.height = outH;
+      outCanvas.getContext("2d").drawImage(srcCanvas, 0, 0, outW, outH);
+
+      var jpegBlob = await new Promise(function(r) { outCanvas.toBlob(r, "image/jpeg", JPEG_QUALITY); });
+      if (!jpegBlob) continue;
+      var jpegBytes = new Uint8Array(await jpegBlob.arrayBuffer());
+
+      if (jpegBytes.length >= streamData.length * 0.9) continue;
+
+      obj.contents = jpegBytes;
+      dict.set(PDFLib.PDFName.of("Filter"), PDFLib.PDFName.of("DCTDecode"));
+      dict.set(PDFLib.PDFName.of("Width"), PDFLib.PDFNumber.of(outW));
+      dict.set(PDFLib.PDFName.of("Height"), PDFLib.PDFNumber.of(outH));
+      dict.set(PDFLib.PDFName.of("ColorSpace"), PDFLib.PDFName.of("DeviceRGB"));
+      dict.set(PDFLib.PDFName.of("BitsPerComponent"), PDFLib.PDFNumber.of(8));
+      dict.set(PDFLib.PDFName.of("Length"), PDFLib.PDFNumber.of(jpegBytes.length));
+      dict.delete(PDFLib.PDFName.of("DecodeParms"));
+
+      compressed++;
+    } catch (e) { continue; }
+  }
+
+  return await pdfDoc.save({ useObjectStreams: true });
+}
+
+function rgbToCmyk(r, g, b) {
+  var k = 1 - Math.max(r, g, b);
+  if (k >= 1) return { c: "0", m: "0", y: "0", k: "1" };
+  var c = (1 - r - k) / (1 - k);
+  var m = (1 - g - k) / (1 - k);
+  var y = (1 - b - k) / (1 - k);
+  return { c: c.toFixed(4), m: m.toFixed(4), y: y.toFixed(4), k: k.toFixed(4) };
+}
+
+async function convertPdfToCmyk(pdfBytes) {
+  var PDFLib = window.PDFLib;
+  var pdfDoc = await PDFLib.PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+  var context = pdfDoc.context;
+
+  var pages = pdfDoc.getPages();
+
+  for (var p = 0; p < pages.length; p++) {
+    var pageNode = pages[p].node;
+    var contentsRef = pageNode.get(PDFLib.PDFName.of("Contents"));
+    if (!contentsRef) continue;
+
+    var streamRefs = [];
+    if (contentsRef instanceof PDFLib.PDFArray) {
+      for (var si = 0; si < contentsRef.size(); si++) {
+        streamRefs.push(contentsRef.get(si));
+      }
+    } else {
+      streamRefs.push(contentsRef);
+    }
+
+    for (var sr = 0; sr < streamRefs.length; sr++) {
+      var streamObj = context.lookup(streamRefs[sr]);
+      if (!streamObj || !(streamObj.contents instanceof Uint8Array)) continue;
+
+      var sDict = streamObj.dict;
+      var sFilterObj = sDict ? sDict.get(PDFLib.PDFName.of("Filter")) : null;
+      var sFilterStr = sFilterObj ? sFilterObj.toString() : "";
+
+      var rawBytes = streamObj.contents;
+      if (sFilterStr.includes("FlateDecode")) {
+        try { rawBytes = pako.inflate(rawBytes); } catch (e) { continue; }
+      }
+
+      var text = new TextDecoder("latin1").decode(rawBytes);
+
+      text = text.replace(/(\d*\.?\d+)\s+(\d*\.?\d+)\s+(\d*\.?\d+)\s+rg/g, function(match, r, g, b) {
+        var cmyk = rgbToCmyk(parseFloat(r), parseFloat(g), parseFloat(b));
+        return cmyk.c + " " + cmyk.m + " " + cmyk.y + " " + cmyk.k + " k";
+      });
+
+      text = text.replace(/(\d*\.?\d+)\s+(\d*\.?\d+)\s+(\d*\.?\d+)\s+RG/g, function(match, r, g, b) {
+        var cmyk = rgbToCmyk(parseFloat(r), parseFloat(g), parseFloat(b));
+        return cmyk.c + " " + cmyk.m + " " + cmyk.y + " " + cmyk.k + " K";
+      });
+
+      var newBytes = new TextEncoder().encode(text);
+      var deflated = pako.deflate(newBytes);
+
+      streamObj.contents = deflated;
+      if (sDict) {
+        sDict.set(PDFLib.PDFName.of("Filter"), PDFLib.PDFName.of("FlateDecode"));
+        sDict.set(PDFLib.PDFName.of("Length"), PDFLib.PDFNumber.of(deflated.length));
+        sDict.delete(PDFLib.PDFName.of("DecodeParms"));
+      }
+    }
+  }
+
+  return await pdfDoc.save({ useObjectStreams: true });
+}
+
+async function mergePdfPages(pdfBytesArray, compress, cmyk) {
+  var PDFLib = window.PDFLib;
+  var mergedPdf = await PDFLib.PDFDocument.create();
+  for (var i = 0; i < pdfBytesArray.length; i++) {
+    var srcDoc = await PDFLib.PDFDocument.load(pdfBytesArray[i]);
+    var copiedPages = await mergedPdf.copyPages(srcDoc, srcDoc.getPageIndices());
+    for (var j = 0; j < copiedPages.length; j++) mergedPdf.addPage(copiedPages[j]);
+  }
+
+  var resultBytes = await mergedPdf.save({ useObjectStreams: true });
+
+  if (compress) {
+    var qs = getQualitySettings();
+    resultBytes = await compressPdfBytes(resultBytes, qs.jpegQuality, qs.downscale);
+  }
+  if (cmyk) {
+    resultBytes = await convertPdfToCmyk(resultBytes);
+  }
+
+  return resultBytes;
+}
+
+async function buildImagePdf(pages, compress, cmyk) {
+  var PDFLib = window.PDFLib;
+  var pdfDoc = await PDFLib.PDFDocument.create();
+  var qs = getQualitySettings();
+
+  for (var i = 0; i < pages.length; i++) {
+    var pageData = pages[i];
+    var imageBytes = pageData.pngBytes;
+    var embedFn = "embedPng";
+    if (imageFormatSel.value === "jpg") {
+      imageBytes = await convertToJpg(pageData.pngBytes, qs.jpegQuality);
+      embedFn = "embedJpg";
+    }
+    var img = embedFn === "embedJpg" ? await pdfDoc.embedJpg(imageBytes) : await pdfDoc.embedPng(imageBytes);
+    var page = pdfDoc.addPage([pageData.width, pageData.height]);
+    page.drawImage(img, { x: 0, y: 0, width: pageData.width, height: pageData.height });
+  }
+
+  var resultBytes = await pdfDoc.save({ useObjectStreams: true });
+
+  if (compress) {
+    resultBytes = await compressPdfBytes(resultBytes, qs.jpegQuality, qs.downscale);
+  }
+  if (cmyk) {
+    resultBytes = await convertPdfToCmyk(resultBytes);
+  }
+
+  return resultBytes;
+}
+
+function convertToJpg(pngBytes, quality) {
+  return new Promise(function(resolve) {
+    var blob = new Blob([pngBytes], { type: "image/png" });
+    var url = URL.createObjectURL(blob);
+    var img = new Image();
+    img.onload = function() {
+      var canvas = document.createElement("canvas");
+      canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
+      canvas.getContext("2d").drawImage(img, 0, 0);
+      canvas.toBlob(function(jpgBlob) {
+        jpgBlob.arrayBuffer().then(function(buf) { resolve(new Uint8Array(buf)); URL.revokeObjectURL(url); });
+      }, "image/jpeg", quality);
+    };
+    img.src = url;
+  });
+}
+
+function downloadBlob(bytes, name, mime) {
+  var blob = new Blob([bytes], { type: mime });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement("a"); a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(function() { URL.revokeObjectURL(url); }, 1000);
+}
+
+// Controla o estado visual da UI e bloqueio de tela
+function setExportingState(isExporting) {
+  if (isExporting) {
+    document.body.classList.add("is-exporting");
+    exportBtn.style.display = "none";
+    progressWrap.classList.add("active");
+    progressFill.style.width = "0%";
+    progressLabel.textContent = "Exporting 0 / " + orderedIds.length;
+  } else {
+    document.body.classList.remove("is-exporting");
+    progressWrap.classList.remove("active");
+    exportBtn.style.display = "block";
+    progressFill.style.width = "0%";
+    exportedPages = [];
+  }
+}
+
+exportBtn.addEventListener("click", function() {
+  var libErr = checkLibraries();
+  if (libErr) { showError(libErr); return; }
+  if (orderedIds.length === 0) { showError("Select frames on the canvas first."); return; }
+  var scale = convertImageCb.checked
+    ? (scaleSel.value === "custom" ? parseFloat(scaleCustom.value) || 1 : parseFloat(scaleSel.value)) : 1;
+  hideError(); 
+  
+  setExportingState(true);
+
+  parent.postMessage({ pluginMessage: {
+    type: "start-export", settings: { orderedIds: orderedIds, scale: scale, convertToImage: convertImageCb.checked }
+  }}, "*");
+});
+
+cancelBtn.addEventListener("click", function() { 
+  parent.postMessage({ pluginMessage: { type: "cancel-export" } }, "*"); 
+  setExportingState(false);
+});
+
+function showError(msg) { errorMsg.textContent = msg; errorMsg.classList.add("active"); }
+function hideError() { errorMsg.classList.remove("active"); }
+
+window.onmessage = function(event) {
+  var msg = event.data.pluginMessage; if (!msg) return;
+
+  if (msg.type === "frames-loaded") {
+    fileName = msg.fileName || "export";
+    pageName = msg.pageName || "Page";
+    frames = msg.frames.map(function(f) {
+      var blob = new Blob([new Uint8Array(f.thumbnail)], { type: "image/png" });
+      return Object.assign({}, f, { thumbnailUrl: URL.createObjectURL(blob) });
+    });
+    if (sortMode === "layers") sortByLayers();
+    else if (sortMode === "az") sortByNameAZ();
+    else if (sortMode === "za") sortByNameZA();
+    else {
+      var newIds = frames.map(function(f) { return f.id; });
+      orderedIds = orderedIds.filter(function(id) { return newIds.includes(id); });
+      var missing = newIds.filter(function(id) { return !orderedIds.includes(id); });
+      orderedIds = orderedIds.concat(missing);
+    }
+    renderFrames();
+  }
+
+  if (msg.type === "selection-changed") { parent.postMessage({ pluginMessage: { type: "get-frames" } }, "*"); }
+  if (msg.type === "get-frames-error") { showError(msg.message); }
+
+  if (msg.type === "frame-exported") {
+    var index = msg.index, total = msg.total;
+    progressLabel.textContent = "Exporting " + (index + 1) + " / " + total;
+    progressFill.style.width = (((index + 1) / total) * 100) + "%";
+    exportedPages.push({ pngBytes: new Uint8Array(msg.bytes), width: msg.originalWidth, height: msg.originalHeight, mode: msg.mode });
+  }
+
+  if (msg.type === "export-complete") {
+    var compress = compressPdfCb.checked;
+    var colorModeEl = document.getElementById("color-mode");
+    var cmyk = colorModeEl ? colorModeEl.value === "cmyk" : false;
+
+    (async function() {
+      var pdfBytes;
+      if (exportedPages.length > 0 && exportedPages[0].mode === "pdf") {
+        progressLabel.textContent = compress ? "Compressing..." : "Building PDF...";
+        pdfBytes = await mergePdfPages(exportedPages.map(function(p) { return p.pngBytes; }), compress, cmyk);
+      } else {
+        progressLabel.textContent = compress ? "Compressing..." : "Building PDF...";
+        pdfBytes = await buildImagePdf(exportedPages, compress, cmyk);
+      }
+      var exportName = fileName + " - " + pageName + ".pdf";
+      downloadBlob(pdfBytes, exportName, "application/pdf");
+    })().then(function() {
+      setExportingState(false);
+    }).catch(function(err) {
+      showError("PDF failed: " + err.message);
+      setExportingState(false);
+    });
+  }
+
+  if (msg.type === "export-cancelled" || msg.type === "export-error") {
+    if (msg.message) showError(msg.message);
+    setExportingState(false);
+  }
+};
+
+showEmptyState();
+</script>
+</body>
+</html>

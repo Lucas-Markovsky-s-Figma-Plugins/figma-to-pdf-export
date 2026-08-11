@@ -1,0 +1,16 @@
+{
+  "name": "figma-to-pdf",
+  "version": "0.2.0",
+  "description": "Plugin do Figma para exportar frames selecionados em um PDF único, leve e em alta qualidade.",
+  "scripts": {
+    "build": "esbuild src/ui.js --bundle --outfile=ui-bundle.js --format=iife",
+    "watch": "esbuild src/ui.js --bundle --outfile=ui-bundle.js --format=iife --watch"
+  },
+  "dependencies": {
+    "pdf-lib": "^1.17.1"
+  },
+  "devDependencies": {
+    "@figma/plugin-typings": "^1.100.0",
+    "esbuild": "^0.23.0"
+  }
+}
